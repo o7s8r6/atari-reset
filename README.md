@@ -1,4 +1,4 @@
-**Status:** Archive (code is provided as-is, no updates expected)
+For research purpose only. Support and/or new releases may be limited.
 
 # Learn RL policies on Atari by resetting from a demonstration
 

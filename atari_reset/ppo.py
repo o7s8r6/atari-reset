@@ -1,3 +1,5 @@
+# Modifications Copyright (c) 2019 Uber Technologies, Inc.
+
 '''
 Proximal policy optimization with a few tricks. Adapted from the implementation in baselines.
 '''
@@ -15,6 +17,7 @@ mpi4py.rc.initialize = False
 from mpi4py import MPI
 from baselines.common import explained_variance
 from baselines.common.mpi_moments import mpi_moments
+import json
 
 class Model(object):
     def __init__(self, policy, ob_space, ac_space, nenv, nsteps, ent_coef, vf_coef, l2_coef,
@@ -200,6 +203,22 @@ def learn(policy, env, nsteps, total_timesteps, ent_coef=1e-4, lr=1e-4,
     update = 0
     epinfobuf = deque(maxlen=100)
     while update < nupdates:
+        if test_mode:
+            def check_done():
+                for i in range(0, 31):
+                    json_path = save_path + '/' + str(i) + '.json'
+                    n_data = 0
+                    try:
+                        n_data = len(json.load(open(json_path)))
+                    except FileNotFoundError:
+                        pass
+                    if n_data < 5:
+                        return False
+                return True
+
+            if check_done():
+                break
+
         tstart = time.time()
         update += 1
 
@@ -207,6 +226,18 @@ def learn(policy, env, nsteps, total_timesteps, ent_coef=1e-4, lr=1e-4,
 
         if hvd.size()>1:
             epinfos = flatten_lists(MPI.COMM_WORLD.allgather(epinfos))
+
+        for epinfo in epinfos:
+            if 'write_to_json' in epinfo:
+                score_list = []
+                json_path = epinfo['json_path']
+                try:
+                    score_list = json.load(open(json_path))
+                except FileNotFoundError:
+                    pass
+                score_list.append(epinfo['write_to_json'])
+                json.dump(score_list, open(json_path, 'w'))
+
 
         if not test_mode:
             mblossvals = []
@@ -243,15 +274,20 @@ def learn(policy, env, nsteps, total_timesteps, ent_coef=1e-4, lr=1e-4,
                             [epinfo['as_good_as_demo'] for epinfo in epinfos_to_report]))
                         logger.logkv('perc_started_below_max_sp', safemean(
                             [epinfo['starting_point'] <= env.max_starting_point for epinfo in epinfos_to_report]))
-                    elif hasattr(env.venv, 'max_starting_point'):
-                        logger.logkv('max_starting_point', env.venv.max_starting_point)
-                        logger.logkv('as_good_as_demo_start', safemean(
-                            [epinfo['as_good_as_demo'] for epinfo in epinfos_to_report if
-                             epinfo['starting_point'] <= env.venv.max_starting_point]))
-                        logger.logkv('as_good_as_demo_all', safemean(
-                            [epinfo['as_good_as_demo'] for epinfo in epinfos_to_report]))
-                        logger.logkv('perc_started_below_max_sp', safemean(
-                            [epinfo['starting_point'] <= env.venv.max_starting_point for epinfo in epinfos_to_report]))
+                    elif hasattr(env.venv, 'n_demos'):
+                        for idx in range(env.venv.n_demos):
+                            logger.logkv(f'max_starting_point_{idx}', env.venv.demos[idx].max_starting_point)
+                            logger.logkv(f'as_good_as_demo_start_{idx}', safemean(
+                                [epinfo['as_good_as_demo'] for epinfo in epinfos_to_report if
+                                 epinfo['starting_point'] <= env.venv.demos[idx].max_starting_point and epinfo['idx'] == idx]))
+                            logger.logkv(f'as_good_as_demo_all_{idx}', safemean(
+                                [epinfo['as_good_as_demo'] for epinfo in epinfos_to_report if epinfo['idx'] == idx]))
+                            logger.logkv(f'perc_below_max_sp_{idx}', safemean(
+                                [epinfo['starting_point'] <= env.venv.demos[idx].max_starting_point for epinfo in epinfos_to_report if epinfo['idx'] == idx]))
+                            logger.logkv(f'avg_score_{idx}', safemean(
+                                [epinfo['r'] for epinfo in epinfos_to_report if epinfo['idx'] == idx]))
+                            logger.logkv(f'avg_score_from_start_{idx}', safemean(
+                                [epinfo['r'] for epinfo in epinfos_to_report if (epinfo['idx'] == idx and epinfo['starting_point'] == 0)]))
 
                 logger.logkv('time_elapsed', tnow - tfirststart)
                 logger.logkv('perc_valid', np.mean(valids))
@@ -269,4 +305,3 @@ def safemean(xs):
 
 def flatten_lists(listoflists):
     return [el for list_ in listoflists for el in list_]
-
