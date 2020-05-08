@@ -1,3 +1,7 @@
+For research purpose only. Support and/or new releases may be limited.
+
+Original project at [openai/atari-reset](https://github.com/openai/atari-reset). This is the modified version for Go-Explore.
+
 # Learn RL policies on Atari by resetting from a demonstration
 
 Codebase for learning to play Atari from demonstrations. Contrary to other work on learning from demonstrations we learn to maximize the score using pure RL, rather than trying to imitate the demo.
